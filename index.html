@@ -91,6 +91,8 @@ h2{font:700 20px/1.2 var(--display); margin:34px 0 10px; letter-spacing:-.01em}
 .opt .t{font-size:15.5px}
 .opt .h{display:block; font-size:13px; color:var(--muted); line-height:1.35; margin-top:2px}
 .opt .seg{flex:none}
+.opt.stack{flex-direction:column; align-items:stretch; gap:10px}
+.opt.stack .seg button{flex:1}
 .opt .seg button{padding:7px 11px; font-size:14px; white-space:nowrap}
 .switch{flex:none; width:51px; height:31px; border-radius:16px; border:0; background:var(--line); position:relative; cursor:pointer; transition:background .2s}
 .switch::after{content:""; position:absolute; top:2px; left:2px; width:27px; height:27px; border-radius:50%; background:#fff; box-shadow:0 2px 4px rgba(0,0,0,.2); transition:transform .2s}
@@ -160,11 +162,12 @@ footer button{margin-top:12px; border:1px solid var(--line); background:transpar
 
   <h2>Vaše situace</h2>
   <div class="set">
-    <div class="opt">
+    <div class="opt stack">
       <span class="t">Typ práce</span>
       <div class="seg" role="group" aria-label="Typ práce">
-        <button id="tHpp" aria-pressed="true">Pracovní poměr</button>
+        <button id="tHpp" aria-pressed="true" aria-label="Hlavní pracovní poměr">HPP</button>
         <button id="tDpp" aria-pressed="false">DPP</button>
+        <button id="tDpc" aria-pressed="false">DPČ</button>
       </div>
     </div>
     <div class="opt">
@@ -201,7 +204,7 @@ footer button{margin-top:12px; border:1px solid var(--line); background:transpar
   <table class="slip"><tbody id="slip"></tbody></table>
 
   <footer>
-    <p>Počítá se s parametry pro rok 2026: průměrná mzda 48 967 Kč, minimální mzda 22 400 Kč, 23% daň z části nad 146 901 Kč měsíčně, strop sociálního pojištění 2 350 416 Kč ročně. Výsledek je orientační a nezahrnuje srážky, benefity, příplatky ani roční zúčtování (třeba slevu na manžela/manželku).</p>
+    <p>Počítá se s parametry pro rok 2026: průměrná mzda 48 967 Kč, minimální mzda 22 400 Kč, 23% daň z části nad 146 901 Kč měsíčně, strop sociálního pojištění 2 350 416 Kč ročně. Pojištění se z DPČ platí od 4 500 Kč a z DPP od 12 000 Kč měsíčně. Výsledek je orientační a nezahrnuje srážky, benefity, příplatky ani roční zúčtování (třeba slevu na manžela/manželku).</p>
     <button id="reset">Vrátit výchozí nastavení</button>
   </footer>
 </div>
@@ -209,7 +212,7 @@ footer button{margin-top:12px; border:1px solid var(--line); background:transpar
 <script>
 const P = { avg:48967, minWage:22400, band:146901, socCapYear:2350416,
   socE:.071, socR:.248, health:.135, taxpayer:2570, inv12:210, inv3:420, ztpp:1345,
-  child:[1267,1860,2320], bonusMinIncome:11200, bonusMin:50, dppLimit:12000 };
+  child:[1267,1860,2320], bonusMinIncome:11200, bonusMin:50, dppLimit:12000, dpcLimit:4500 };
 
 const DEFAULTS = {mode:'gross', amount:40000, type:'hpp', decl:true, kids:0, kidsZtp:0, inv:0, ztp:false, hours:40};
 const KEY = 'cista-mzda-2026';
@@ -221,19 +224,22 @@ const fmt = n => Math.round(n).toLocaleString('cs-CZ');
 const kc = n => fmt(n) + '\u00a0Kč';
 const pct = (a,b) => b > 0 ? Math.round(a/b*100) : 0;
 
+const limitOf = t => t === 'dpp' ? P.dppLimit : t === 'dpc' ? P.dpcLimit : 0;
+const typeName = t => t === 'dpp' ? 'DPP' : 'DPČ';
+
 function calc(gross, s){
   const r = {gross, socE:0, healthE:0, topUp:0, socR:0, healthR:0, taxRaw:0, disc:0, childCredit:0, childUsed:0, tax:0, bonus:0, withholding:false, insured:false};
   if (gross <= 0) { r.net = 0; r.cost = 0; return r; }
-  r.insured = s.type === 'hpp' || gross >= P.dppLimit;
+  r.insured = s.type === 'hpp' || gross >= limitOf(s.type);
   if (r.insured) {
     r.socE = Math.ceil(gross * P.socE);
     r.socR = Math.ceil(gross * P.socR);
     const ht = Math.ceil(gross * P.health);
     r.healthE = Math.ceil(ht / 3);
     r.healthR = ht - r.healthE;
-    if (s.type === 'hpp' && gross < P.minWage) { r.topUp = Math.ceil((P.minWage - gross) * P.health); r.healthE += r.topUp; }
+    if (s.type !== 'dpp' && gross < P.minWage) { r.topUp = Math.ceil((P.minWage - gross) * P.health); r.healthE += r.topUp; }
   }
-  if (!s.decl && s.type === 'dpp' && gross < P.dppLimit) {
+  if (!s.decl && s.type !== 'hpp' && gross < limitOf(s.type)) {
     r.withholding = true;
     r.taxRaw = Math.floor(gross * .15); r.tax = r.taxRaw;
   } else {
@@ -261,7 +267,7 @@ function calc(gross, s){
 
 function findGross(target, s){
   if (target <= 0) return 0;
-  const segs = s.type === 'dpp' ? [[0, P.dppLimit - 1], [P.dppLimit, 3e6]] : [[0, 3e6]];
+  const segs = s.type === 'hpp' ? [[0, 3e6]] : [[0, limitOf(s.type) - 1], [limitOf(s.type), 3e6]];
   for (const [a, b] of segs) {
     if (calc(b, s).net < target) continue;
     let lo = a, hi = b;
@@ -304,8 +310,8 @@ function countTo(v){
 function render(){
   const isGross = S.mode === 'gross';
   $('mGross').setAttribute('aria-pressed', isGross); $('mNet').setAttribute('aria-pressed', !isGross);
-  $('tHpp').setAttribute('aria-pressed', S.type === 'hpp'); $('tDpp').setAttribute('aria-pressed', S.type === 'dpp');
-  $('amtLbl').textContent = isGross ? (S.type === 'dpp' ? 'Měsíční odměna z DPP (hrubá)' : 'Hrubá měsíční mzda') : 'Kolik chcete dostat čistého';
+  $('tHpp').setAttribute('aria-pressed', S.type === 'hpp'); $('tDpc').setAttribute('aria-pressed', S.type === 'dpc'); $('tDpp').setAttribute('aria-pressed', S.type === 'dpp');
+  $('amtLbl').textContent = isGross ? (S.type === 'hpp' ? 'Hrubá měsíční mzda' : 'Měsíční odměna z ' + typeName(S.type) + ' (hrubá)') : 'Kolik chcete dostat čistého';
   $('decl').setAttribute('aria-checked', S.decl); $('ztp').setAttribute('aria-checked', S.ztp);
   document.querySelectorAll('[data-inv]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.inv === S.inv));
   $('kids').textContent = S.kids; $('kidsZtp').textContent = S.kidsZtp; $('hours').textContent = S.hours;
@@ -349,15 +355,15 @@ function render(){
       const d = Math.round((gross / P.avg - 1) * 100);
       ins.push(`<li>Vaše hrubá mzda je ${d === 0 ? 'zhruba na' : d > 0 ? `o <b>${d} %</b> nad` : `o <b>${-d} %</b> pod`} průměrem, který pro rok 2026 činí ${kc(P.avg)}.</li>`);
     }
-    if (!S.decl && !(S.type === 'dpp' && gross < P.dppLimit)) {
+    if (!S.decl && !r.withholding) {
       const gain = calc(gross, {...S, decl:true}).net - r.net;
       if (gain > 0) ins.push(`<li class="good">Podepsáním prohlášení poplatníka byste měsíčně dostali o <b>${kc(gain)}</b> víc.</li>`);
     }
-    if (S.type === 'dpp' && gross >= P.dppLimit) {
-      const below = calc(P.dppLimit - 1, S);
-      if (below.net >= r.net) ins.push(`<li class="warn">Od 12 000 Kč se z DPP platí pojištění. S odměnou 11 999 Kč byste dostali <b>${kc(below.net)}</b>, tedy víc než teď.</li>`);
+    if (S.type !== 'hpp' && gross >= limitOf(S.type)) {
+      const L = limitOf(S.type), below = calc(L - 1, S);
+      if (below.net >= r.net) ins.push(`<li class="warn">Od ${kc(L)} se z ${typeName(S.type)} platí pojištění. S odměnou ${kc(L - 1)} byste dostali <b>${kc(below.net)}</b>, tedy víc než teď.</li>`);
     }
-    if (S.type === 'dpp' && gross < P.dppLimit && !S.decl) ins.push(`<li>Bez prohlášení se z DPP do 12 000 Kč strhává 15% srážková daň a tím je daň vyřízená. S prohlášením a slevou na poplatníka byste dostali <b>${kc(calc(gross,{...S,decl:true}).net)}</b>, ale jen pokud prohlášení nemáte podepsané jinde.</li>`);
+    if (r.withholding) ins.push(`<li>Bez prohlášení se z ${typeName(S.type)} pod ${kc(limitOf(S.type))} strhává 15% srážková daň a tím je daň vyřízená. S prohlášením a slevou na poplatníka byste dostali <b>${kc(calc(gross,{...S,decl:true}).net)}</b>, ale jen pokud prohlášení nemáte podepsané jinde.</li>`);
     if (r.bonus > 0) ins.push(`<li class="good">Stát vám k výplatě přidá daňový bonus na děti <b>${kc(r.bonus)}</b>.</li>`);
     if (S.decl && S.kids > 0 && gross < P.bonusMinIncome && r.childCredit > r.childUsed) ins.push(`<li class="warn">Daňový bonus na děti se vyplácí až od příjmu 11 200 Kč měsíčně.</li>`);
     if (r.topUp > 0) ins.push(`<li class="warn">Jste pod minimální mzdou, takže doplácíte zdravotní pojištění <b>${kc(r.topUp)}</b>. Neplatí to, pokud za vás pojištění hradí stát (student, důchodce, rodič na rodičovské) nebo máte jinou práci.</li>`);
@@ -370,13 +376,13 @@ function render(){
   if (r.insured) {
     rows.push(['Sociální pojištění (7,1 %)', '−' + kc(r.socE)]);
     rows.push(['Zdravotní pojištění (4,5 %)' + (r.topUp ? ', vč. doplatku' : ''), '−' + kc(r.healthE)]);
-  } else if (gross > 0) rows.push(['Pojištění (DPP pod 12 000 Kč)', '0\u00a0Kč', 'minor']);
+  } else if (gross > 0) rows.push(['Pojištění (' + typeName(S.type) + ' pod ' + kc(limitOf(S.type)) + ')', '0\u00a0Kč', 'minor']);
   if (r.withholding) rows.push(['Srážková daň (15 %)', '−' + kc(r.tax)]);
   else if (gross > 0) {
     rows.push([gross > P.band ? 'Záloha na daň (15 % a 23 %)' : 'Záloha na daň (15 %)', kc(r.taxRaw), 'minor']);
     if (r.disc) rows.push(['Slevy na dani', '−' + kc(Math.min(r.disc, r.taxRaw)), 'minor']);
     if (r.childUsed) rows.push(['Zvýhodnění na děti', '−' + kc(r.childUsed), 'minor']);
-    rows.push(['Daň po slevách', '−' + kc(r.tax)]);
+    rows.push(['Daň po slevách', (r.tax ? '−' : '') + kc(r.tax)]);
     if (r.bonus) rows.push(['Daňový bonus na děti', '+' + kc(r.bonus), 'pos']);
   }
   rows.push(['Čistá mzda', kc(r.net), 'total']);
@@ -410,6 +416,7 @@ function switchMode(m){
 $('mGross').onclick = () => switchMode('gross');
 $('mNet').onclick = () => switchMode('net');
 $('tHpp').onclick = () => { S.type = 'hpp'; render(); };
+$('tDpc').onclick = () => { S.type = 'dpc'; render(); };
 $('tDpp').onclick = () => { S.type = 'dpp'; render(); };
 $('decl').onclick = () => { S.decl = !S.decl; render(); };
 $('ztp').onclick = () => { S.ztp = !S.ztp; render(); };
